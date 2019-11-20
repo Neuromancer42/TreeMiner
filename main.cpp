@@ -6,6 +6,8 @@
 #include <deque>
 #include <set>
 
+#define DEBUG 1
+
 struct Tree {
     int id;
     typedef std::map<int, std::vector<Tree *>> LabelMap;
@@ -74,24 +76,29 @@ struct Tree {
 
     std::string to_string() {
         std::ostringstream ss;
-        ss << label << ","; //TODO: delimiter needs revision
-        for (auto sub : subtrees) {
-            ss << sub->to_string() << ",";
+        auto vec = to_vector();
+#if DEBUG
+        if (vec.empty()) {
+            std::cerr << "TransformError: empty tree" << std::endl;
+            exit(-1);
         }
-        ss << -1;
+        if (vec.size() % 2 != 0) {
+            std::cerr << "TransformError: backtrack -1" << std::endl;
+            exit(-1);
+        }
+#endif
+        for (auto v : vec) {
+            ss << v << ' ';
+        }
         return ss.str();
     }
 
-
-    // TODO: merge get_all_nodes and get_label_nodes?
-    std::vector<Tree *> get_all_nodes() {
-        auto v = std::vector<Tree *>();
-        v.push_back(this);
-        for (auto sub : subtrees) {
-            auto sub_v = sub->get_all_nodes();
-            v.insert(v.end(), sub_v.begin(), sub_v.end());
+    void print_whole_tree() {
+        auto r = this;
+        while (r->parent != nullptr) {
+            r = r->parent;
         }
-        return v;
+        std::cout << r->to_string() << std::endl;
     }
 
     std::vector<Tree *> get_label_nodes(int target_label) {
@@ -159,31 +166,63 @@ struct ProjectedTree {
     // mapped refers to the location of new node in pattern tree
     // attached refers to the location that the new node attachs in pattern tree
     std::vector<ProjectedTree> split(int label, Tree * mapped, Tree * attached) {
-        auto new_prodbs = std::vector<ProjectedTree>();
+        auto new_proj_trees = std::vector<ProjectedTree>();
 
         // check if the projected tree has expected attaching node
         auto p = proj.find(attached);
         if (p == proj.end()) {
-            return new_prodbs;
+            return new_proj_trees;
         }
         auto cand_proj_trees = p->second;
 
-        // check if the projected tree has expected label
+        // find all occurrences of label in attached subtrees
         for (auto cand_proj_tree : cand_proj_trees) {
             auto cand_cores = cand_proj_tree->get_label_nodes(label);
             for (auto core : cand_cores) {
-                // TODO: generate a new prodb if a GE-backbone is found
-                auto new_prodb = new ProjectedTree({tree_id, std::map<Tree *, std::vector<Tree *>>()});
-                for (auto p : proj) {
-                    new_prodb
-                }
-                for (auto sub : core->subtrees) {
+                // for each occurence of new label, build a new projected tree
 
+                // 1. subtrees of core are attached to mapped
+                auto new_proj_tree = ProjectedTree(core, mapped);
+
+                // 2. collateral nodes of core are attached to attached
+                for (auto cur = core; cur != cand_proj_tree; cur = cur->parent) {
+                    for (auto sub : cur->parent->subtrees) {
+                        if (sub != cur) {
+                            new_proj_tree.proj[attached].push_back(sub);
+                        }
+                    }
                 }
+
+                // 3. other attaching points are preserved
+                for (auto ap : proj) {
+                    if (ap.first != attached) {
+                        // 3.1 other attaching poitns
+                        new_proj_tree.proj[ap.first] = ap.second;
+                    } else {
+                        // 3.2 attached, all except cand_proj_tree
+                        for (auto cand : ap.second) {
+                            if (cand != cand_proj_tree) {
+                                new_proj_tree.proj[ap.first].push_back(cand);
+                            }
+                        }
+                    }
+                }
+
+                // prune the new_proj_tree
+                //new_proj_tree.proj.erase(std::remove_if(new_proj_tree.proj.begin(), new_proj_tree.proj.end(),
+                //        [](std::map<Tree *, std::vector<Tree *>>::iterator it){return it->second.empty();}
+                //        ), new_proj_tree.proj.end());
+                new_proj_trees.push_back(new_proj_tree);
             }
         }
 
-        return new_prodbs
+        return new_proj_trees;
+    }
+
+    // map a occurrance into a sub_pattern, and transform its subnodes into a projected tree
+    ProjectedTree(Tree * occ, Tree * mapped) {
+        tree_id = occ->id;
+        proj[mapped] = occ->subtrees;
     }
 };
 
@@ -205,7 +244,7 @@ std::vector<std::pair<int, Tree *>> get_growth_elements(const std::vector<Projec
     }
     auto ges = std::vector<std::pair<int, Tree *>>();
     for (auto p : candidates) {
-        if (p.second.size() > min_sup) {
+        if (p.second.size() >= min_sup) {
             ges.push_back(p.first);
         }
     }
@@ -221,15 +260,80 @@ void Fre(Tree * sub_pattern, int size, std::vector<ProjectedTree> prodb, int min
         // extend sub_pattern S to S' in-place
         auto new_node = attached->push_new_node(label);
 
-        // TODO generate new ProDB from previous ProDB
+        // output S'
+        new_node->print_whole_tree();
+
+        // generate new ProDB from previous ProDB
         auto new_prodb = std::vector<ProjectedTree>();
         for (auto proj_tree : prodb) {
+            auto new_proj_trees = proj_tree.split(label, new_node, attached);
+            new_prodb.insert(new_prodb.end(), new_proj_trees.begin(), new_proj_trees.end());
+        }
 
+        // recursively find larger frequent pattern
+        Fre(sub_pattern, size + 1, new_prodb, min_sup);
+
+        // backtracking, remove the new node
+        attached->pop_node(new_node);
+        delete new_node;
+    }
+}
+
+void PrefixESpan(std::vector<Tree*> db, int min_sup) {
+    // collect all labels, with its frequency and occurance
+    std::map<int, int> freq_map;
+    std::map<int, std::vector<Tree*>> occur_map;
+    for (auto tree : db) {
+        for (auto p : tree->get_label_map()) {
+            int label = p.first;
+            freq_map[label]++;
+            occur_map[label].insert(occur_map[label].end(), p.second.begin(), p.second.end());
+        }
+    }
+    for (auto p : freq_map) {
+        int label = p.first;
+        int freq = p.second;
+        if (freq >= min_sup) {
+            // generate a new pattern tree
+            auto s = new Tree(-1, label, nullptr, 0);
+
+            // print the frequent pattern
+            s->print_whole_tree();
+
+            // generate a new ProDB
+            // for each occurrance, build a new projected tree
+            auto prodb = std::vector<ProjectedTree>();
+            for (auto occ : occur_map[label]) {
+                auto proj_tree = ProjectedTree(occ, s);
+                prodb.push_back(proj_tree);
+            }
+            Fre(s, 1, prodb, min_sup);
         }
     }
 }
 
+#if DEBUG
+void test() {
+    auto t1_vec = std::vector<int>({2, 1, 3, 5, -1, -1, -1, 1, 2, -1, 4, -1, -1, -1});
+    auto t2_vec = std::vector<int>({1, 2, 2, -1, 4, -1, -1, 3, -1, -1});
+    auto t1 = new Tree(1, t1_vec);
+    auto t2 = new Tree(2, t2_vec);
+    if (t1->to_vector() != t1_vec) {
+        std::cerr << "Test Error: t1's representation is inconsistent" << std::endl;
+        exit(-1);
+    }
+    if (t2->to_vector() != t2_vec) {
+        std::cerr << "Test Error: t1's representation is inconsistent" << std::endl;
+        exit(-1);
+    }
+    std::vector<Tree *> db = {t1, t2};
+    PrefixESpan(db, 2);
+}
+#endif
+
 int main() {
-    std::cout << "Hello, World!" << std::endl;
+#if DEBUG
+    test();
+#endif
     return 0;
 }
