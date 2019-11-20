@@ -7,9 +7,6 @@
 #include <set>
 #include <fstream>
 
-#define DEBUG 1
-#define PRINT_PATTERN 1
-
 struct Tree {
     int id;
     typedef std::map<int, std::vector<Tree *>> LabelMap;
@@ -398,9 +395,17 @@ void process_file(std::string filename, int sup_percent) {
     std::cerr << "Maxsize of frequent patterns: " << ans.second << std::endl;
 }
 
-int main() {
+int main(int argc, char** argv) {
 #if DEBUG
     test();
+#else
+    if (argc != 3) {
+        std::cerr << "Usage: " << argv[0] << " <file> <percentage>" << std::endl;
+        exit(-1);
+    }
+    std::string filename(argv[1]);
+    int percent = std::stoi(argv[2]);
+    process_file(filename, percent);
 #endif
     return 0;
 }
