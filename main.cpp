@@ -5,8 +5,10 @@
 #include <algorithm>
 #include <deque>
 #include <set>
+#include <fstream>
 
 #define DEBUG 1
+#define PRINT_PATTERN 1
 
 struct Tree {
     int id;
@@ -251,7 +253,9 @@ std::vector<std::pair<int, Tree *>> get_growth_elements(const std::vector<Projec
     return ges;
 }
 
-void Fre(Tree * sub_pattern, int size, std::vector<ProjectedTree> prodb, int min_sup) {
+// returns number and max size of frequent pattern
+std::pair<int, int> Fre(Tree * sub_pattern, int size, std::vector<ProjectedTree> prodb, int min_sup) {
+    int num = 0, maxsize = 0;
     auto ges = get_growth_elements(prodb, min_sup);
     for (auto ge : ges) {
         int label = ge.first;
@@ -260,8 +264,14 @@ void Fre(Tree * sub_pattern, int size, std::vector<ProjectedTree> prodb, int min
         // extend sub_pattern S to S' in-place
         auto new_node = attached->push_new_node(label);
 
+#if PRINT_PATTERN
         // output S'
         new_node->print_whole_tree();
+#endif
+        num++;
+        if (size + 1 > maxsize) {
+            maxsize = size + 1;
+        }
 
         // generate new ProDB from previous ProDB
         auto new_prodb = std::vector<ProjectedTree>();
@@ -271,15 +281,22 @@ void Fre(Tree * sub_pattern, int size, std::vector<ProjectedTree> prodb, int min
         }
 
         // recursively find larger frequent pattern
-        Fre(sub_pattern, size + 1, new_prodb, min_sup);
+        auto super_ans = Fre(sub_pattern, size + 1, new_prodb, min_sup);
+        num += super_ans.first;
+        if (super_ans.second > maxsize) {
+            maxsize = super_ans.second;
+        }
 
         // backtracking, remove the new node
         attached->pop_node(new_node);
         delete new_node;
     }
+    return std::make_pair(num, maxsize);
 }
 
-void PrefixESpan(std::vector<Tree*> db, int min_sup) {
+// returns number and max size of frequent pattern
+std::pair<int, int> PrefixESpan(std::vector<Tree*> db, int min_sup) {
+    int num = 0, maxsize = 0;
     // collect all labels, with its frequency and occurance
     std::map<int, int> freq_map;
     std::map<int, std::vector<Tree*>> occur_map;
@@ -297,8 +314,15 @@ void PrefixESpan(std::vector<Tree*> db, int min_sup) {
             // generate a new pattern tree
             auto s = new Tree(-1, label, nullptr, 0);
 
+#ifdef PRINT_PATTERN
             // print the frequent pattern
             s->print_whole_tree();
+#endif
+            num++;
+            if (1 > maxsize) {
+                maxsize = 1;
+            }
+
 
             // generate a new ProDB
             // for each occurrance, build a new projected tree
@@ -307,9 +331,14 @@ void PrefixESpan(std::vector<Tree*> db, int min_sup) {
                 auto proj_tree = ProjectedTree(occ, s);
                 prodb.push_back(proj_tree);
             }
-            Fre(s, 1, prodb, min_sup);
+            auto super_ans = Fre(s, 1, prodb, min_sup);
+            num += super_ans.first;
+            if (super_ans.second > maxsize) {
+                maxsize = super_ans.second;
+            }
         }
     }
+    return std::make_pair(num, maxsize);
 }
 
 #if DEBUG
@@ -323,13 +352,51 @@ void test() {
         exit(-1);
     }
     if (t2->to_vector() != t2_vec) {
-        std::cerr << "Test Error: t1's representation is inconsistent" << std::endl;
+        std::cerr << "Test Error: t2's representation is inconsistent" << std::endl;
         exit(-1);
     }
     std::vector<Tree *> db = {t1, t2};
-    PrefixESpan(db, 2);
+    auto ans = PrefixESpan(db, 2);
+    if (ans.second != 3) {
+        std::cerr << "Test Error: wrong max size" << std::endl;
+        exit(-1);
+    } else {
+        std::cout << "Pass simple test" << std::endl;
+    }
 }
 #endif
+
+void process_file(std::string filename, int sup_percent) {
+    auto db = std::vector<Tree *>();
+    int tree_num = 0;
+
+    // parse the file
+    std::ifstream infile;
+    infile.open(filename);
+    std::string line;
+    while (std::getline(infile, line)) {
+        std::istringstream iss(line);
+        auto vec = std::vector<int>();
+        int x;
+        while (iss >> x) {
+            vec.push_back(x);
+        }
+        if (!vec.empty()) {
+            tree_num++;
+            auto tree = new Tree(tree_num, vec);
+            db.push_back(tree);
+        }
+    }
+
+    int min_sup = (int)std::ceil(tree_num * sup_percent / 100.0);
+
+    auto ans = PrefixESpan(db, min_sup);
+    std::cerr << "DB name: " << filename << std::endl;
+    std::cerr << "Num of trees: " << tree_num << std::endl;
+    std::cerr << "Support percent: " << sup_percent << '%' << std::endl;
+    std::cerr << "Num of frequent patterns: " << ans.first << std::endl;
+    std::cerr << "Maxsize of frequent patterns: " << ans.second << std::endl;
+}
 
 int main() {
 #if DEBUG
