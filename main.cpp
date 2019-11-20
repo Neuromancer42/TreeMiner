@@ -6,6 +6,7 @@
 #include <deque>
 #include <set>
 #include <fstream>
+#include <chrono>
 
 struct Tree {
     int id;
@@ -367,6 +368,7 @@ void process_file(std::string filename, int sup_percent) {
     auto db = std::vector<Tree *>();
     int tree_num = 0;
 
+    auto start = std::chrono::high_resolution_clock::now();
     // parse the file
     std::ifstream infile;
     infile.open(filename);
@@ -388,11 +390,15 @@ void process_file(std::string filename, int sup_percent) {
     int min_sup = (int)std::ceil(tree_num * sup_percent / 100.0);
 
     auto ans = PrefixESpan(db, min_sup);
+
+    auto finish = std::chrono::high_resolution_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(finish - start);
     std::cerr << "DB name: " << filename << std::endl;
     std::cerr << "Num of trees: " << tree_num << std::endl;
     std::cerr << "Support percent: " << sup_percent << '%' << std::endl;
     std::cerr << "Num of frequent patterns: " << ans.first << std::endl;
     std::cerr << "Maxsize of frequent patterns: " << ans.second << std::endl;
+    std::cerr << "Time usage: " << elapsed.count() << "ms" << std::endl;
 }
 
 int main(int argc, char** argv) {
