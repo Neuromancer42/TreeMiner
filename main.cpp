@@ -194,7 +194,7 @@ struct ProjectedTree {
                 }
 
                 // 3. other attaching points are preserved
-                for (auto ap : proj) {
+                for (auto& ap : proj) {
                     if (ap.first != attached) {
                         // 3.1 other attaching poitns
                         new_proj_tree.proj[ap.first] = ap.second;
@@ -230,9 +230,9 @@ struct ProjectedTree {
 std::vector<std::pair<int, Tree *>> get_growth_elements(const std::vector<ProjectedTree>& prodb, int min_sup) {
     // candidates of growth elements, (label, attached nodes) -> set of tree ids
     auto candidates = std::map<std::pair<int, Tree *>, std::set<int>>();
-    for (auto proj_tree : prodb) {
+    for (auto& proj_tree : prodb) {
         int id = proj_tree.tree_id;
-        for (auto p : proj_tree.proj) {
+        for (auto& p : proj_tree.proj) {
             Tree * attached = p.first;
             for (auto sub : p.second) {
                 auto labels = sub->get_labels();
@@ -243,7 +243,7 @@ std::vector<std::pair<int, Tree *>> get_growth_elements(const std::vector<Projec
         }
     }
     auto ges = std::vector<std::pair<int, Tree *>>();
-    for (auto p : candidates) {
+    for (auto& p : candidates) {
         if (p.second.size() >= min_sup) {
             ges.push_back(p.first);
         }
@@ -252,7 +252,7 @@ std::vector<std::pair<int, Tree *>> get_growth_elements(const std::vector<Projec
 }
 
 // returns number and max size of frequent pattern
-std::pair<int, int> Fre(Tree * sub_pattern, int size, std::vector<ProjectedTree> prodb, int min_sup) {
+std::pair<int, int> Fre(Tree * sub_pattern, int size, const std::vector<ProjectedTree>& prodb, int min_sup) {
     int num = 0, maxsize = 0;
     auto ges = get_growth_elements(prodb, min_sup);
     for (auto ge : ges) {
@@ -293,7 +293,7 @@ std::pair<int, int> Fre(Tree * sub_pattern, int size, std::vector<ProjectedTree>
 }
 
 // returns number and max size of frequent pattern
-std::pair<int, int> PrefixESpan(std::vector<Tree*> db, int min_sup) {
+std::pair<int, int> PrefixESpan(const std::vector<Tree*>& db, int min_sup) {
     int num = 0, maxsize = 0;
     // collect all labels, with its frequency and occurance
     std::map<int, int> freq_map;
@@ -364,7 +364,7 @@ void test() {
 }
 #endif
 
-void process_file(std::string filename, int sup_percent) {
+void process_file(const std::string& filename, int sup_percent) {
     auto db = std::vector<Tree *>();
     int tree_num = 0;
 
@@ -387,7 +387,7 @@ void process_file(std::string filename, int sup_percent) {
         }
     }
 
-    int min_sup = (int)std::ceil(tree_num * sup_percent / 100.0);
+    int min_sup = tree_num * sup_percent / 100;
 
     auto ans = PrefixESpan(db, min_sup);
 
