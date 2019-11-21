@@ -196,7 +196,7 @@ struct ProjectedTree {
                 // 3. other attaching points are preserved
                 for (auto& ap : proj) {
                     if (ap.first != attached) {
-                        // 3.1 other attaching poitns
+                        // 3.1 other attaching points
                         new_proj_tree.proj[ap.first] = ap.second;
                     } else {
                         // 3.2 attached, all except cand_proj_tree
@@ -364,7 +364,7 @@ void test() {
 }
 #endif
 
-void process_file(const std::string& filename, int sup_percent) {
+void process_file(const std::string& filename, double sup_percent) {
     auto db = std::vector<Tree *>();
     int tree_num = 0;
 
@@ -387,7 +387,7 @@ void process_file(const std::string& filename, int sup_percent) {
         }
     }
 
-    int min_sup = tree_num * sup_percent / 100;
+    int min_sup = (int)(tree_num * sup_percent / 100);
 
     auto ans = PrefixESpan(db, min_sup);
 
@@ -410,7 +410,7 @@ int main(int argc, char** argv) {
         exit(-1);
     }
     std::string filename(argv[1]);
-    int percent = std::stoi(argv[2]);
+    double percent = std::stod(argv[2]);
     process_file(filename, percent);
 #endif
     return 0;
