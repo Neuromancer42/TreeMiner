@@ -8,59 +8,71 @@
 #include <fstream>
 #include <chrono>
 
-struct Tree {
+struct Node {
     int id;
-    typedef std::map<int, std::vector<Tree *>> LabelMap;
+    typedef std::map<int, std::vector<Node *>> LabelMap;
     int label;
-    int depth;
-    Tree * parent;
+    int pos;
+    Node * parent;
     // in a pattern tree, subtrees acts as a stack
-    std::vector<Tree *> subtrees;
+    std::vector<Node *> subtrees;
+    int subnode_count;
 
-    Tree(int id,
-            std::vector<int>::const_iterator repr_begin,
-            std::vector<int>::const_iterator repr_end,
-            Tree * p = nullptr,
-            int d = 0) : id(id), parent(p), depth(d) {
+    Node(int id,
+         std::vector<int>::const_iterator repr_begin,
+         std::vector<int>::const_iterator repr_end,
+         Node * p = nullptr,
+         int start_pos = 0) : id(id), parent(p), pos(start_pos) {
         if (repr_begin == repr_end) {
-            std::cerr << "Not a Tree: empty" << std::endl;
+            std::cerr << "Not a Node: empty" << std::endl;
             exit(-1);
         }
         if (*repr_begin < 0) {
-            std::cerr << "Not a Tree: unmatched -1" << std::endl;
+            std::cerr << "Not a Node: unmatched -1" << std::endl;
             exit(-1);
         }
         label = *repr_begin;
         auto sub_end = repr_begin + 1;
         auto sub_begin = sub_end;
         int depth_count = 1;
+        int cur_count = 0;
+        subnode_count = 0;
         while (depth_count > 0) {
             if (sub_end == repr_end) {
-                std::cerr << "Not a Tree: incomplete" << std::endl;
+                std::cerr << "Not a Node: incomplete" << std::endl;
                 exit(-1);
             }
             if (*sub_end < 0) {
                 --depth_count;
             } else {
                 ++depth_count;
+                ++cur_count;
             }
             ++sub_end;
             if (depth_count == 1) {
-                auto sub = new Tree(id, sub_begin, sub_end, this, d + 1);
+                auto sub = new Node(id, sub_begin, sub_end, this, pos + subnode_count + 1);
+#if DEBUG
+                if (cur_count * 2 != sub_end - sub_begin) {
+                    std::cerr << "Not a Node: sub_tree malformed" << std::endl;
+                    exit(-1);
+                }
+#endif
                 subtrees.push_back(sub);
                 sub_begin = sub_end;
+                subnode_count += cur_count;
+                cur_count = 0;
             }
         }
         if (sub_end != repr_end) {
-            std::cerr << "Not a Tree: redundant elements" << std::endl;
+            std::cerr << "Not a Node: redundant elements" << std::endl;
             exit(-1);
         }
-        //std::sort(subtrees.begin(), subtrees.end(), [](Tree * a, Tree * b){ return a->label < b->label; });
+        //std::sort(subtrees.begin(), subtrees.end(), [](Node * a, Node * b){ return a->label < b->label; });
     }
 
-    explicit Tree(int id, const std::vector<int>& repr) : Tree(id, repr.cbegin(), repr.cend(), nullptr, 0) {}
+    explicit Node(int id, const std::vector<int>& repr) : Node(id, repr.cbegin(), repr.cend(), nullptr, 1) {}
 
-    Tree(int id, int l, Tree * p, int d) : id(id), label(l), depth(d), parent(p), subtrees() {}
+    Node(int id, int l, Node * p, int d) : id(id), label(l), pos(d), parent(p), subtrees(), subnode_count(0) {}
 
     std::vector<int> to_vector() {
         auto v = std::vector<int>();
@@ -101,8 +113,8 @@ struct Tree {
         std::cout << r->to_string() << std::endl;
     }
 
-    std::vector<Tree *> get_label_nodes(int target_label) {
-        auto v = std::vector<Tree *>();
+    std::vector<Node *> get_label_nodes(int target_label) {
+        auto v = std::vector<Node *>();
         if (label == target_label) {
             v.push_back(this);
         }
@@ -126,24 +138,27 @@ struct Tree {
         return m;
     }
 
-    std::set<int> get_labels() {
-        auto s = std::set<int>();
-        s.insert(label);
+    std::vector<int> get_labels() {
+        auto s = std::vector<int>();
+        s.push_back(label);
         for (auto sub : subtrees) {
             auto sub_s = sub->get_labels();
-            s.insert(sub_s.begin(), sub_s.end());
+            s.insert(s.end(), sub_s.begin(), sub_s.end());
         }
         return s;
     }
 
-    Tree * push_new_node(int sub_label) {
-        auto sub_node = new Tree(id, sub_label, this, depth+1);
+    Node * push_new_node(int sub_label) {
+        auto sub_node = new Node(id, sub_label, this, pos + subnode_count + 1);
         subtrees.push_back(sub_node);
+        for (Node * cur = this; cur != nullptr; cur = cur->parent) {
+            cur->subnode_count++;
+        }
         return sub_node;
     }
 
     // the parameter node is used for check stack correctness
-    void pop_node(Tree * node) {
+    void pop_node(Node * node) {
 #if DEBUG
         if (subtrees.empty()) {
             std::cerr << "Stack error: pop from an empty tree" << std::endl;
@@ -155,19 +170,29 @@ struct Tree {
         }
 #endif
         subtrees.pop_back();
+        for (Node * cur = this; cur != nullptr; cur = cur->parent) {
+            cur->subnode_count--;
+        }
     }
 };
 
-struct ProjectedTree {
+struct ProjectInstance {
     int tree_id;
     // attached nodes in sub-pattern tree mapped to its subtrees in raw tree
-    std::map<Tree *, std::vector<Tree *>> proj;
+    std::map<Node *, std::vector<Node *>> proj;
 
     // mapped refers to the location of new node in pattern tree
     // attached refers to the location that the new node attachs in pattern tree
-    std::vector<ProjectedTree> split(int label, Tree * mapped, Tree * attached) {
-        auto new_proj_trees = std::vector<ProjectedTree>();
-
+    std::vector<ProjectInstance> split(Node * mapped) {
+        auto new_proj_trees = std::vector<ProjectInstance>();
+        int label = mapped->label;
+        Node * attached = mapped->parent;
+#if DEBUG
+        if (attached == nullptr) {
+            std::cerr << "Pattern construction error: no root" << std::endl;
+            exit(-1);
+        }
+#endif
         // check if the projected tree has expected attaching node
         auto p = proj.find(attached);
         if (p == proj.end()) {
@@ -182,35 +207,29 @@ struct ProjectedTree {
                 // for each occurence of new label, build a new projected tree
 
                 // 1. subtrees of core are attached to mapped
-                auto new_proj_tree = ProjectedTree(core, mapped);
+                auto new_proj_tree = ProjectInstance(core, mapped);
 
                 // 2. collateral nodes of core are attached to attached
                 for (auto cur = core; cur != cand_proj_tree; cur = cur->parent) {
                     for (auto sub : cur->parent->subtrees) {
-                        if (sub != cur) {
+                        if (sub->pos > cur->pos) {
                             new_proj_tree.proj[attached].push_back(sub);
                         }
                     }
                 }
 
-                // 3. other attaching points are preserved
+                // 3. other attaching points after core are preserved
                 for (auto& ap : proj) {
-                    if (ap.first != attached) {
-                        // 3.1 other attaching points
-                        new_proj_tree.proj[ap.first] = ap.second;
-                    } else {
-                        // 3.2 attached, all except cand_proj_tree
-                        for (auto cand : ap.second) {
-                            if (cand != cand_proj_tree) {
-                                new_proj_tree.proj[ap.first].push_back(cand);
-                            }
+                    for (auto sub : ap.second) {
+                        if (sub->pos > core->pos) {
+                            new_proj_tree.proj[ap.first].push_back(sub);
                         }
                     }
                 }
 
                 // prune the new_proj_tree
                 //new_proj_tree.proj.erase(std::remove_if(new_proj_tree.proj.begin(), new_proj_tree.proj.end(),
-                //        [](std::map<Tree *, std::vector<Tree *>>::iterator it){return it->second.empty();}
+                //        [](std::map<Node *, std::vector<Node *>>::iterator it){return it->second.empty();}
                 //        ), new_proj_tree.proj.end());
                 new_proj_trees.push_back(new_proj_tree);
             }
@@ -220,20 +239,23 @@ struct ProjectedTree {
     }
 
     // map a occurrance into a sub_pattern, and transform its subnodes into a projected tree
-    ProjectedTree(Tree * occ, Tree * mapped) {
+    ProjectInstance(Node * occ, Node * mapped) {
         tree_id = occ->id;
-        proj[mapped] = occ->subtrees;
+        proj = std::map<Node *, std::vector<Node *>>();
+        if (!occ->subtrees.empty()) {
+            proj[mapped] = occ->subtrees;
+        }
     }
 };
 
 // Scan prodb to find all frequent growth elements
-std::vector<std::pair<int, Tree *>> get_growth_elements(const std::vector<ProjectedTree>& prodb, int min_sup) {
+std::vector<std::pair<int, Node *>> get_growth_elements(const std::vector<ProjectInstance>& prodb, int min_sup) {
     // candidates of growth elements, (label, attached nodes) -> set of tree ids
-    auto candidates = std::map<std::pair<int, Tree *>, std::set<int>>();
+    auto candidates = std::map<std::pair<int, Node *>, std::set<int>>();
     for (auto& proj_tree : prodb) {
         int id = proj_tree.tree_id;
         for (auto& p : proj_tree.proj) {
-            Tree * attached = p.first;
+            Node * attached = p.first;
             for (auto sub : p.second) {
                 auto labels = sub->get_labels();
                 for (int l : labels) {
@@ -242,7 +264,7 @@ std::vector<std::pair<int, Tree *>> get_growth_elements(const std::vector<Projec
             }
         }
     }
-    auto ges = std::vector<std::pair<int, Tree *>>();
+    auto ges = std::vector<std::pair<int, Node *>>();
     for (auto& p : candidates) {
         if (p.second.size() >= min_sup) {
             ges.push_back(p.first);
@@ -252,17 +274,27 @@ std::vector<std::pair<int, Tree *>> get_growth_elements(const std::vector<Projec
 }
 
 // returns number and max size of frequent pattern
-std::pair<int, int> Fre(Tree * sub_pattern, int size, const std::vector<ProjectedTree>& prodb, int min_sup) {
+std::pair<int, int> Fre(Node * sub_pattern, int size, const std::vector<ProjectInstance>& prodb, int min_sup) {
     int num = 0, maxsize = 0;
     auto ges = get_growth_elements(prodb, min_sup);
     for (auto ge : ges) {
         int label = ge.first;
-        Tree * attached = ge.second;
+        Node * attached = ge.second;
 
         // extend sub_pattern S to S' in-place
         auto new_node = attached->push_new_node(label);
 
-#if PRINT_PATTERN
+#if DEBUG
+        {
+            Node * cur = new_node;
+            while (cur->parent != nullptr) {
+                cur = cur->parent;
+            }
+            if (cur->subnode_count + 1 != new_node->pos) {
+                std::cerr << "Pattern construction error: wrong indexing" << std::endl;
+                exit(-1);
+            }
+        }
         // output S'
         new_node->print_whole_tree();
 #endif
@@ -272,9 +304,9 @@ std::pair<int, int> Fre(Tree * sub_pattern, int size, const std::vector<Projecte
         }
 
         // generate new ProDB from previous ProDB
-        auto new_prodb = std::vector<ProjectedTree>();
+        auto new_prodb = std::vector<ProjectInstance>();
         for (auto proj_tree : prodb) {
-            auto new_proj_trees = proj_tree.split(label, new_node, attached);
+            auto new_proj_trees = proj_tree.split(new_node);
             new_prodb.insert(new_prodb.end(), new_proj_trees.begin(), new_proj_trees.end());
         }
 
@@ -293,11 +325,11 @@ std::pair<int, int> Fre(Tree * sub_pattern, int size, const std::vector<Projecte
 }
 
 // returns number and max size of frequent pattern
-std::pair<int, int> PrefixESpan(const std::vector<Tree*>& db, int min_sup) {
+std::pair<int, int> PrefixESpan(const std::vector<Node*>& db, int min_sup) {
     int num = 0, maxsize = 0;
-    // collect all labels, with its frequency and occurance
+    // collect all labels, with its frequency and occurrance
     std::map<int, int> freq_map;
-    std::map<int, std::vector<Tree*>> occur_map;
+    std::map<int, std::vector<Node*>> occur_map;
     for (auto tree : db) {
         for (auto p : tree->get_label_map()) {
             int label = p.first;
@@ -310,9 +342,9 @@ std::pair<int, int> PrefixESpan(const std::vector<Tree*>& db, int min_sup) {
         int freq = p.second;
         if (freq >= min_sup) {
             // generate a new pattern tree
-            auto s = new Tree(-1, label, nullptr, 0);
+            auto s = new Node(-1, label, nullptr, 1);
 
-#ifdef PRINT_PATTERN
+#ifdef DEBUG
             // print the frequent pattern
             s->print_whole_tree();
 #endif
@@ -324,9 +356,9 @@ std::pair<int, int> PrefixESpan(const std::vector<Tree*>& db, int min_sup) {
 
             // generate a new ProDB
             // for each occurrance, build a new projected tree
-            auto prodb = std::vector<ProjectedTree>();
+            auto prodb = std::vector<ProjectInstance>();
             for (auto occ : occur_map[label]) {
-                auto proj_tree = ProjectedTree(occ, s);
+                auto proj_tree = ProjectInstance(occ, s);
                 prodb.push_back(proj_tree);
             }
             auto super_ans = Fre(s, 1, prodb, min_sup);
@@ -343,8 +375,8 @@ std::pair<int, int> PrefixESpan(const std::vector<Tree*>& db, int min_sup) {
 void test() {
     auto t1_vec = std::vector<int>({2, 1, 3, 5, -1, -1, -1, 1, 2, -1, 4, -1, -1, -1});
     auto t2_vec = std::vector<int>({1, 2, 2, -1, 4, -1, -1, 3, -1, -1});
-    auto t1 = new Tree(1, t1_vec);
-    auto t2 = new Tree(2, t2_vec);
+    auto t1 = new Node(1, t1_vec);
+    auto t2 = new Node(2, t2_vec);
     if (t1->to_vector() != t1_vec) {
         std::cerr << "Test Error: t1's representation is inconsistent" << std::endl;
         exit(-1);
@@ -353,7 +385,7 @@ void test() {
         std::cerr << "Test Error: t2's representation is inconsistent" << std::endl;
         exit(-1);
     }
-    std::vector<Tree *> db = {t1, t2};
+    std::vector<Node *> db = {t1, t2};
     auto ans = PrefixESpan(db, 2);
     if (ans.second != 3) {
         std::cerr << "Test Error: wrong max size" << std::endl;
@@ -365,7 +397,7 @@ void test() {
 #endif
 
 void process_file(const std::string& filename, double sup_percent) {
-    auto db = std::vector<Tree *>();
+    auto db = std::vector<Node *>();
     int tree_num = 0;
 
     auto start = std::chrono::high_resolution_clock::now();
@@ -382,7 +414,7 @@ void process_file(const std::string& filename, double sup_percent) {
         }
         if (!vec.empty()) {
             tree_num++;
-            auto tree = new Tree(tree_num, vec);
+            auto tree = new Node(tree_num, vec);
             db.push_back(tree);
         }
     }
